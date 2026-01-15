@@ -1,0 +1,90 @@
+services:  # Define los servicios que compondran el stack de Airflow
+    postgres:  # Base de datos PostgreSQL que almacena los metadatos
+        image: postgres:16  # Imagen oficial de PostgreSQL 16
+        env_file:
+            - .env  # Carga variables sensibles desde el archivo .env
+        environment:  # Variables de entorno necesarias para inicializar la base
+            POSTGRES_USER: ${POSTGRES_USER}  # Usuario de la base de datos definido en .env
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Password del usuario airflow
+            POSTGRES_DB: ${POSTGRES_DB}  # Nombre de la base de datos a crear
+        volumes:
+            - postgres-db-volume:/var/lib/postgresql/data  # Volumen persistente para los datos de Postgres
+        healthcheck:
+            test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]  # Comprueba que Postgres acepte conexiones
+            interval: 5s  # Tiempo entre comprobaciones
+            retries: 5  # Numero maximo de reintentos antes de marcar unhealthy
+        restart: always  # Reinicia el contenedor si se detiene inesperadamente
+
+    airflow-init:  # Servicio temporal para preparar la base de datos de Airflow
+        build: .  # Construye una imagen personalizada definida en Dockerfile
+        image: prueba-airflow:latest  # Nombre local para reutilizar la imagen
+        depends_on:
+            postgres:
+                condition: service_healthy  # Espera a que Postgres pase el healthcheck
+        env_file:
+            - .env  # Comparte la configuracion definida en .env
+        environment:  # Configuracion base que coincide con la del resto de servicios
+            AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR}  # Ejecuta tareas de manera local en el contenedor
+            AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW_DB_URI}  # Cadena de conexion a Postgres
+            AIRFLOW__CORE__LOAD_EXAMPLES: "${AIRFLOW_LOAD_EXAMPLES}"  # Evita cargar DAGs de ejemplo
+            _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USERNAME}  # Usuario administrador para la UI
+            _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}  # Password del usuario admin
+        volumes:
+            - ./dags:/opt/airflow/dags  # Monta los DAGs del host
+            - ./logs:/opt/airflow/logs  # Monta los logs generados por Airflow
+            - ./plugins:/opt/airflow/plugins  # Monta plugins personalizados
+            - ./config:/opt/airflow/config  # Monta configuraciones adicionales
+        command: >  # Ordenes que se ejecutan al lanzar el contenedor de inicializacion
+            bash -c "
+            airflow db migrate &&
+            airflow users create --username $${_AIRFLOW_WWW_USER_USERNAME} --password $${_AIRFLOW_WWW_USER_PASSWORD} --firstname ${AIRFLOW_ADMIN_FIRSTNAME} --lastname ${AIRFLOW_ADMIN_LASTNAME} --role Admin --email ${AIRFLOW_ADMIN_EMAIL}
+            "
+        restart: "no"  # Solo debe ejecutarse una vez
+
+    airflow-webserver:  # Servicio que expone la UI de Airflow
+        image: prueba-airflow:latest  # Usa la imagen personalizada construida por airflow-init
+        depends_on:
+            postgres:
+                condition: service_healthy  # Requiere Postgres listo
+            airflow-init:
+                condition: service_completed_successfully  # Solo arranca si la inicializacion termino bien
+        env_file:
+            - .env  # Comparte la configuracion definida en .env
+        environment:
+            AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR}  # Debe coincidir con el resto
+            AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW_DB_URI}  # Conexion a Postgres
+            AIRFLOW__CORE__LOAD_EXAMPLES: "${AIRFLOW_LOAD_EXAMPLES}"  # No cargar DAGs de ejemplo
+            AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "${AIRFLOW_WEBSERVER_EXPOSE_CONFIG}"  # Permite ver la configuracion desde la UI
+        ports:
+            - "${AIRFLOW_WEBSERVER_PORT}:8080"  # Expone la UI en http://localhost:${AIRFLOW_WEBSERVER_PORT}
+        volumes:
+            - ./dags:/opt/airflow/dags  # Comparte DAGs con el host
+            - ./logs:/opt/airflow/logs  # Comparte logs con el host
+            - ./plugins:/opt/airflow/plugins  # Comparte plugins con el host
+            - ./config:/opt/airflow/config  # Comparte configuraciones con el host
+        command: webserver  # Ejecuta el proceso de webserver de Airflow
+        restart: always  # Reinicia el webserver si se detiene
+
+    airflow-scheduler:  # Servicio que planifica y lanza las tareas
+        image: prueba-airflow:latest  # Usa la imagen personalizada con los requisitos necesarios
+        depends_on:
+            postgres:
+                condition: service_healthy  # Necesita Postgres disponible
+            airflow-init:
+                condition: service_completed_successfully  # Requiere que la DB ya este migrada
+        env_file:
+            - .env  # Comparte la configuracion definida en .env
+        environment:
+            AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR}  # Mismo executor que el resto
+            AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW_DB_URI}  # Conexion a Postgres
+            AIRFLOW__CORE__LOAD_EXAMPLES: "${AIRFLOW_LOAD_EXAMPLES}"  # Sin DAGs de ejemplo
+        volumes:
+            - ./dags:/opt/airflow/dags  # Monta los DAGs para poder ejecutarlos
+            - ./logs:/opt/airflow/logs  # Monta los logs para escritura
+            - ./plugins:/opt/airflow/plugins  # Monta plugins personalizados
+            - ./config:/opt/airflow/config  # Monta configuraciones
+        command: scheduler  # Lanza el proceso del scheduler
+        restart: always  # Debe mantenerse siempre activo
+
+volumes:  # Declaracion de volumenes nombrados
+    postgres-db-volume:  # Volumen para persistir los datos de Postgres

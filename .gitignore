@@ -1,5 +1,5 @@
-/config
 /logs
 /plugins
 */__pycache__/
 .env
+simple_auth_manager_passwords.json

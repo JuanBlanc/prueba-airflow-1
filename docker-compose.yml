@@ -27,6 +27,9 @@ services:  # Define los servicios que compondran el stack de Airflow
             AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR}  # Ejecuta tareas de manera local en el contenedor
             AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW_DB_URI}  # Cadena de conexion a Postgres
             AIRFLOW__CORE__LOAD_EXAMPLES: "${AIRFLOW_LOAD_EXAMPLES}"  # Evita cargar DAGs de ejemplo
+            AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager  # Usa el nuevo gestor de autenticacion
+            AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_ADMIN_USERNAME}:ADMIN"  # Usuario Admin para el API server
+            AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json  # Archivo con passwords
             _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USERNAME}  # Usuario administrador para la UI
             _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}  # Password del usuario admin
         volumes:
@@ -34,11 +37,7 @@ services:  # Define los servicios que compondran el stack de Airflow
             - ./logs:/opt/airflow/logs  # Monta los logs generados por Airflow
             - ./plugins:/opt/airflow/plugins  # Monta plugins personalizados
             - ./config:/opt/airflow/config  # Monta configuraciones adicionales
-        command: >  # Ordenes que se ejecutan al lanzar el contenedor de inicializacion
-            bash -c "
-            airflow db migrate &&
-            airflow users create --username $${_AIRFLOW_WWW_USER_USERNAME} --password $${_AIRFLOW_WWW_USER_PASSWORD} --firstname ${AIRFLOW_ADMIN_FIRSTNAME} --lastname ${AIRFLOW_ADMIN_LASTNAME} --role Admin --email ${AIRFLOW_ADMIN_EMAIL}
-            "
+        command: ["bash", "-c", "set -euo pipefail && airflow db migrate && python /opt/airflow/config/create_admin.py"]  # Ordenes que se ejecutan al lanzar el contenedor de inicializacion
         restart: "no"  # Solo debe ejecutarse una vez
 
     airflow-webserver:  # Servicio que expone la UI de Airflow
@@ -54,6 +53,9 @@ services:  # Define los servicios que compondran el stack de Airflow
             AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR}  # Debe coincidir con el resto
             AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW_DB_URI}  # Conexion a Postgres
             AIRFLOW__CORE__LOAD_EXAMPLES: "${AIRFLOW_LOAD_EXAMPLES}"  # No cargar DAGs de ejemplo
+            AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager  # Gestor de auth
+            AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_ADMIN_USERNAME}:ADMIN"  # Usuarios autorizados
+            AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json  # Password store
             AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "${AIRFLOW_WEBSERVER_EXPOSE_CONFIG}"  # Permite ver la configuracion desde la UI
         ports:
             - "${AIRFLOW_WEBSERVER_PORT}:8080"  # Expone la UI en http://localhost:${AIRFLOW_WEBSERVER_PORT}
@@ -62,7 +64,7 @@ services:  # Define los servicios que compondran el stack de Airflow
             - ./logs:/opt/airflow/logs  # Comparte logs con el host
             - ./plugins:/opt/airflow/plugins  # Comparte plugins con el host
             - ./config:/opt/airflow/config  # Comparte configuraciones con el host
-        command: webserver  # Ejecuta el proceso de webserver de Airflow
+        command: api-server  # Ejecuta el nuevo servidor de la API/UI de Airflow 3
         restart: always  # Reinicia el webserver si se detiene
 
     airflow-scheduler:  # Servicio que planifica y lanza las tareas
@@ -78,6 +80,9 @@ services:  # Define los servicios que compondran el stack de Airflow
             AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR}  # Mismo executor que el resto
             AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW_DB_URI}  # Conexion a Postgres
             AIRFLOW__CORE__LOAD_EXAMPLES: "${AIRFLOW_LOAD_EXAMPLES}"  # Sin DAGs de ejemplo
+            AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager  # Gestor de auth
+            AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_ADMIN_USERNAME}:ADMIN"  # Usuarios autorizados
+            AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json  # Password store
         volumes:
             - ./dags:/opt/airflow/dags  # Monta los DAGs para poder ejecutarlos
             - ./logs:/opt/airflow/logs  # Monta los logs para escritura

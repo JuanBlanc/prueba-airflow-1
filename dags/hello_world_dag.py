@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
 
 
 def say_hello() -> None:
@@ -11,7 +11,7 @@ def say_hello() -> None:
 with DAG(
     dag_id="hello_world",
     description="Simple hello world example",
-    schedule_interval="@daily",
+    schedule="@daily",
     start_date=datetime(2024, 1, 1),
     catchup=False,
     tags=["example"],

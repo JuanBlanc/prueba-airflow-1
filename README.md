@@ -1,6 +1,6 @@
 # Prueba Airflow
 
-Pequeno entorno de Airflow 2.10.3 basado en Docker Compose. Incluye PostgreSQL como base de metadatos, servicios de webserver y scheduler, y un DAG de ejemplo `hello_world`.
+Pequeno entorno de Airflow 3.1.6 basado en Docker Compose. Incluye PostgreSQL como base de metadatos, el nuevo servicio `api-server` (reemplazo del webserver tradicional) y un DAG de ejemplo `hello_world`.
 
 ## Contenido del repositorio
 - `docker-compose.yml`: orquestacion de Postgres y los servicios de Airflow.
@@ -27,7 +27,7 @@ Pequeno entorno de Airflow 2.10.3 basado en Docker Compose. Incluye PostgreSQL c
    docker compose up airflow-init
    ```
    Cuando termine correctamente puedes detenerlo con `Ctrl+C`.
-4. Arranca el resto de servicios en segundo plano:
+4. Arranca el API server y el scheduler en segundo plano:
    ```bash
    docker compose up -d postgres airflow-webserver airflow-scheduler
    ```

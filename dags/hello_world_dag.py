@@ -1,22 +1,16 @@
 from datetime import datetime
 
-from airflow import DAG
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import DAG, task
+from airflow.providers.standard.operators.bash import BashOperator
 
+# A Dag represents a workflow, a collection of tasks
+with DAG(dag_id="demo", start_date=datetime(2026, 1, 1), schedule="0 0 * * *") as dag:
+    # Tasks are represented as operators
+    hello = BashOperator(task_id="hello", bash_command="echo hello")
 
-def say_hello() -> None:
-    print("Hello World!")
+    @task()
+    def airflow():
+        print("airflow")
 
-
-with DAG(
-    dag_id="hello_world",
-    description="Simple hello world example",
-    schedule="@daily",
-    start_date=datetime(2024, 1, 1),
-    catchup=False,
-    tags=["example"],
-) as dag:
-    PythonOperator(
-        task_id="print_hello",
-        python_callable=say_hello,
-    )
+    # Set dependencies between tasks
+    hello >> airflow()

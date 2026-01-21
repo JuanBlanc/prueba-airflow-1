@@ -5,7 +5,7 @@ Pequeno entorno de Airflow 3.1.6 basado en Docker Compose. Incluye PostgreSQL co
 ## Contenido del repositorio
 - `docker-compose.yml`: orquestacion de Postgres y los servicios de Airflow.
 - `dags/hello_world_dag.py`: DAG sencillo que imprime "Hello World!" a diario.
-- `Dockerfile` y `requirements.txt`: definen la imagen personalizada de Airflow con librerias adicionales (por ejemplo scikit-learn).
+- `Dockerfile` y `requirements.txt`: definen la imagen personalizada de Airflow con librerias adicionales (por ejemplo scikit-learn) que solo utiliza el servicio `airflow-worker` al ejecutar los DAGs.
 - `.env.example`: plantilla con todas las variables que usa Docker Compose (copia a `.env` y edita si quieres otros valores).
 - Directorios montados (`dags`, `logs`, `plugins`, `config`) para desarrollar desde el host.
 
@@ -18,18 +18,19 @@ Pequeno entorno de Airflow 3.1.6 basado en Docker Compose. Incluye PostgreSQL co
    cp .env.example .env
    ```
    Ajusta los valores si necesitas distintos usuarios o puertos.
-2. Construye la imagen personalizada con las dependencias declaradas en `requirements.txt`:
+2. Construye la imagen personalizada del worker (se etiqueta como `prueba-airflow:latest`):
    ```bash
-   docker compose build
+   docker compose build airflow-worker
    ```
-3. Inicializa la base de datos y crea el usuario admin:
+3. Inicializa la base de datos y crea/actualiza el usuario admin (se guarda en PostgreSQL con los datos definidos en `.env`):
    ```bash
    docker compose up airflow-init
    ```
-   Cuando termine correctamente puedes detenerlo con `Ctrl+C`.
+   Cuando termine correctamente puedes detenerlo con `Ctrl+C`. Este paso ejecuta un
+   script que asegura que el usuario/rol `Admin` exista en la base de metadatos.
 4. Arranca el API server y el scheduler en segundo plano:
    ```bash
-   docker compose up -d postgres airflow-webserver airflow-scheduler
+   docker compose up -d postgres airflow-apiserver airflow-scheduler
    ```
 5. Abre `http://localhost:8080`, inicia sesion con las credenciales definidas en `.env` (por defecto `admin / admin`) y activa el DAG `hello_world` para ver la salida en los logs.
 

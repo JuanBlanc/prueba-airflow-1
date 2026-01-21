@@ -1,40 +1,120 @@
 """
-Writes the credential file consumed by the SimpleAuthManager.
-Airflow 3 removes the legacy `airflow users` CLI in favor of the new auth manager.
-We create/update the password store here to keep a deterministic admin login.
+Create or update the admin user for the FAB auth manager using env credentials.
+
+Airflow 3 removed the legacy ``airflow users`` CLI, so we manage the user directly
+in the metadata database. The user information (username, password, etc.) comes
+from the environment variables defined in ``.env``.
 """
 
 from __future__ import annotations
 
-import json
 import os
-from pathlib import Path
+from typing import Any
+
+from sqlalchemy import create_engine, text
+from werkzeug.security import generate_password_hash
+
+
+def _required_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} environment variable must be set")
+    return value
 
 
 def main() -> None:
-    username = os.environ.get("_AIRFLOW_WWW_USER_USERNAME")
-    password = os.environ.get("_AIRFLOW_WWW_USER_PASSWORD")
-    password_file = os.environ.get("AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE")
-
+    username = os.environ.get("AIRFLOW_ADMIN_USERNAME") or os.environ.get("_AIRFLOW_WWW_USER_USERNAME")
+    password = os.environ.get("AIRFLOW_ADMIN_PASSWORD") or os.environ.get("_AIRFLOW_WWW_USER_PASSWORD")
+    first_name = os.environ.get("AIRFLOW_ADMIN_FIRSTNAME") or "Admin"
+    last_name = os.environ.get("AIRFLOW_ADMIN_LASTNAME") or "User"
+    email = os.environ.get("AIRFLOW_ADMIN_EMAIL") or "admin@example.com"
     if not username or not password:
         raise RuntimeError("Admin username/password env vars must be set")
-    if not password_file:
-        raise RuntimeError("AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE must be configured")
 
-    path = Path(password_file)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    database_uri = _required_env("AIRFLOW__DATABASE__SQL_ALCHEMY_CONN")
+    hashed_password = generate_password_hash(password)
 
-    if path.exists():
-        try:
-            data = json.loads(path.read_text())
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Invalid JSON in password file: {path}") from exc
-    else:
-        data = {}
+    engine = create_engine(database_uri)
 
-    data[username] = password
-    path.write_text(json.dumps(data))
-    print(f"Stored password for '{username}' in {path}")
+    with engine.begin() as conn:
+        # Ensure the Admin role exists.
+        role_id = conn.execute(
+            text("SELECT id FROM ab_role WHERE name = :name"),
+            {"name": "Admin"},
+        ).scalar()
+        if role_id is None:
+            role_id = conn.execute(
+                text("INSERT INTO ab_role (name) VALUES (:name) RETURNING id"),
+                {"name": "Admin"},
+            ).scalar_one()
+
+        user_row = conn.execute(
+            text("SELECT id FROM ab_user WHERE username = :username"),
+            {"username": username},
+        ).fetchone()
+
+        params: dict[str, Any] = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
+            "password": hashed_password,
+            "email": email,
+        }
+
+        if user_row:
+            user_id = user_row[0]
+            conn.execute(
+                text(
+                    """
+                    UPDATE ab_user
+                    SET first_name = :first_name,
+                        last_name = :last_name,
+                        email = :email,
+                        password = :password,
+                        active = true
+                    WHERE id = :user_id
+                    """
+                ),
+                {**params, "user_id": user_id},
+            )
+        else:
+            user_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO ab_user (first_name, last_name, username, password, email, active)
+                    VALUES (:first_name, :last_name, :username, :password, :email, true)
+                    RETURNING id
+                    """
+                ),
+                params,
+            ).scalar_one()
+
+        conn.execute(
+            text("DELETE FROM ab_user_role WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        )
+        assoc_id = conn.execute(
+            text("SELECT to_regclass('ab_user_role_id_seq')")
+        ).scalar()
+        if assoc_id:
+            new_id = conn.execute(
+                text("SELECT nextval('ab_user_role_id_seq')")
+            ).scalar_one()
+        else:
+            new_id = conn.execute(
+                text("SELECT COALESCE(MAX(id), 0) + 1 FROM ab_user_role")
+            ).scalar_one()
+        conn.execute(
+            text(
+                """
+                INSERT INTO ab_user_role (id, user_id, role_id)
+                VALUES (:id, :user_id, :role_id)
+                """
+            ),
+            {"id": new_id, "user_id": user_id, "role_id": role_id},
+        )
+
+    print(f"Stored admin user '{username}' in metadata database.")
 
 
 if __name__ == "__main__":
